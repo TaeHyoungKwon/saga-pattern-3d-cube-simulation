@@ -30,9 +30,9 @@ export default function App() {
     <div className="h-screen flex flex-col bg-slate-50 dark:bg-saga-bg">
       <Header />
       <main className="flex flex-col lg:flex-row flex-1 min-h-0 relative">
-        {/* 3D Cube - hidden when diagram is fullscreen */}
+        {/* 3D Cube - hidden when diagram fullscreen or mobile drawer open */}
         {!diagramFullscreen && (
-          <div className="flex-1 lg:w-[60%] lg:flex-none min-h-0 h-full max-lg:h-1/2 relative">
+          <div className={`flex-1 lg:w-[60%] lg:flex-none min-h-0 h-full max-lg:h-1/2 relative ${drawerOpen ? 'max-md:hidden' : ''}`}>
             <CubeSearch />
             <CubeScene />
           </div>
@@ -59,7 +59,7 @@ export default function App() {
             </button>
           )}
           {drawerOpen && selectedPatternId && (
-            <div className="fixed inset-x-0 bottom-9 top-12 z-10 bg-slate-50/95 dark:bg-saga-bg/95 backdrop-blur-sm overflow-y-auto">
+            <div className="fixed inset-x-0 bottom-9 top-12 z-10 bg-slate-50 dark:bg-saga-bg overflow-y-auto">
               <DetailPanel />
             </div>
           )}
