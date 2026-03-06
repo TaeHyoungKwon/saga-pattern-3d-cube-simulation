@@ -9,7 +9,7 @@ function initMermaid(isDark: boolean) {
   mermaid.initialize({
     startOnLoad: false,
     theme: isDark ? 'dark' : 'default',
-    securityLevel: 'loose',
+    securityLevel: 'strict',
     sequence: {
       actorMargin: 30,
       messageFontSize: 12,
