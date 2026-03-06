@@ -19,9 +19,10 @@ saga-pattern-3d-simulation/
 │   ├── components/
 │   │   ├── cube/
 │   │   │   ├── CubeScene.tsx       # R3F Canvas + 카메라/조명
-│   │   │   ├── CubeEdges.tsx       # 큐브 와이어프레임 엣지
-│   │   │   ├── PatternNode.tsx     # 꼭짓점 노드 (구체 + 라벨)
-│   │   │   └── AxisLabels.tsx      # 축 이름 라벨 (X/Y/Z)
+│   │   │   ├── CubeEdges.tsx       # 큐브 와이어프레임 엣지 (선택 시 하이라이트)
+│   │   │   ├── CubeSearch.tsx      # 패턴 검색 (/ 키보드 단축키)
+│   │   │   ├── PatternNode.tsx     # 꼭짓점 노드 (구체 + 라벨 + 디밍)
+│   │   │   └── AxisLabels.tsx      # 축 이름 라벨 (X/Y/Z, 선택 시 강조)
 │   │   ├── detail/
 │   │   │   ├── DetailPanel.tsx     # 패턴 상세 패널 컨테이너
 │   │   │   ├── PatternInfo.tsx     # 패턴 기본 정보 (이름, 속성, 장단점)
@@ -39,6 +40,9 @@ saga-pattern-3d-simulation/
 │   │   └── index.ts               # 타입 정의
 │   └── utils/
 │       └── mermaid.ts             # Mermaid 다이어그램 생성 유틸
+├── .github/
+│   └── workflows/
+│       └── deploy.yml              # GitHub Pages 자동 배포
 ├── package.json
 ├── tsconfig.json
 ├── vite.config.ts
@@ -106,6 +110,8 @@ type ViewMode = "happy" | "failure" | "combined"
 ```ts
 // src/store/useStore.ts
 
+type Theme = 'light' | 'dark'
+
 type AppState = {
   // 선택된 패턴
   selectedPatternId: string | null
@@ -120,8 +126,16 @@ type AppState = {
   setViewMode: (mode: ViewMode) => void
 
   // 실패 주입 지점
-  failurePoint: FailurePoint | null
-  setFailurePoint: (point: FailurePoint | null) => void
+  failurePoint: FailurePoint
+  setFailurePoint: (point: FailurePoint) => void
+
+  // 다이어그램 전체화면
+  diagramFullscreen: boolean
+  setDiagramFullscreen: (v: boolean) => void
+
+  // 다크/라이트 테마 (localStorage 저장)
+  theme: Theme
+  toggleTheme: () => void
 
   // 비교 모드 (V2)
   // comparePatternId: string | null
@@ -135,21 +149,30 @@ type AppState = {
 ### 4.1 App.tsx — 루트 레이아웃
 
 ```
-책임: 전체 레이아웃 구성
+책임: 전체 레이아웃 구성 + 테마 관리
 구조:
   <div className="h-screen flex flex-col">
-    <Header />
+    <Header />              {/* 테마 토글 포함 */}
     <main className="flex flex-1">
-      <CubeScene />       {/* 좌측 60% */}
-      <DetailPanel />     {/* 우측 40% */}
+      <CubeSearch />        {/* 패턴 검색 (큐브 위 오버레이) */}
+      <CubeScene />         {/* 좌측 60% */}
+      <DetailPanel />       {/* 우측 40% */}
     </main>
     <Legend />
   </div>
 
+테마:
+  - html 요소에 'dark' 클래스 토글
+  - localStorage에 테마 저장/복원
+
+다이어그램 전체화면:
+  - fullscreen 모드 시 CubeScene 숨김
+  - DetailPanel 내 SequenceDiagram이 전체화면 모달로 전환
+
 반응형:
-  - lg(1024+): flex-row
-  - md(768~1023): flex-col (큐브 상단, 패널 하단)
-  - sm(<768): 큐브 전체 + 패널 슬라이드 오버레이
+  - lg(1024+): flex-row (좌우 분할)
+  - md(768~1023): flex-col (큐브 상단 50%, 패널 하단 50%)
+  - sm(<768): 큐브 전체화면 + 플로팅 Details 버튼 + 드로어 오버레이
 ```
 
 ### 4.2 CubeScene.tsx — 3D 큐브 씬
@@ -160,11 +183,11 @@ type AppState = {
 
 구성:
   <Canvas>
-    <OrbitControls />          // 마우스 드래그 회전, 스크롤 줌
-    <ambientLight />
-    <pointLight />
-    <CubeEdges />              // 와이어프레임
-    <AxisLabels />             // 축 라벨
+    <OrbitControls />          // 마우스 드래그 회전, 스크롤 줌, 댐핑
+    <ambientLight />           // 테마별 intensity (dark: 0.5, light: 0.7)
+    <pointLight />             // 테마별 intensity (dark: 0.8, light: 1.0)
+    <CubeEdges />              // 와이어프레임 (선택 시 하이라이트)
+    <AxisLabels />             // 축 라벨 (선택 시 관련 축 강조)
     {patterns.map(p => <PatternNode key={p.id} pattern={p} />)}
   </Canvas>
 
@@ -173,8 +196,39 @@ type AppState = {
   - lookAt: [0, 0, 0]
   - FOV: 50
 
+배경색:
+  - Dark: #0F172A
+  - Light: #F8FAFC
+
+빈 공간 클릭:
+  - onPointerMissed → selectPattern(null) (선택 해제)
+
 큐브 크기:
   - 각 축 범위: -1 ~ 1 (총 2 단위)
+```
+
+### 4.2.1 CubeSearch.tsx — 패턴 검색
+
+```
+책임: 3D 큐브 위 오버레이로 패턴 검색 기능 제공
+위치: 큐브 뷰 좌측 상단 (absolute positioning)
+
+검색 대상:
+  - 패턴 이름 (name)
+  - 통신 방식 (communication)
+  - 일관성 모델 (consistency)
+  - 조율 방식 (coordination)
+  - 패턴 ID
+
+키보드 단축키:
+  - / → 검색 입력 포커스
+  - Escape → 검색 닫기
+
+드롭다운:
+  - 검색어 없으면 전체 패턴 표시
+  - 검색어 있으면 필터링된 패턴 표시
+  - 패턴 클릭 → selectPattern(id) + 드롭다운 닫기
+  - 외부 클릭 → 드롭다운 닫기
 ```
 
 ### 4.3 PatternNode.tsx — 패턴 노드
@@ -184,52 +238,62 @@ type AppState = {
 Props: { pattern: SagaPattern }
 
 구체:
-  - 기본: radius 0.08, 반투명 (opacity 0.7)
-  - 호버: radius 0.12, opacity 1.0
-  - 선택: radius 0.12, 색상 #10B981
+  - 기본: radius 0.08, 반투명 (opacity 0.7), scale 1.0
+  - 호버: scale 1.4, opacity 1.0, emissive 0.2
+  - 선택: scale 1.8, opacity 1.0, emissive 0.4
+  - 비선택 (다른 노드 선택 시): scale 0.7, opacity 0.25
+  - 색상: 선택/호버 시 테마색 (dark: white, light: dark), 기본 #9CA3AF
+  - 애니메이션: useFrame으로 매 프레임 보간 (factor 0.12)
 
 라벨:
-  - @react-three/drei의 Html 또는 Text 컴포넌트
-  - 항상 카메라를 향하도록 (billboard)
-  - 폰트 크기: 기본 12px, 호버/선택 시 14px
+  - @react-three/drei의 Html 컴포넌트 (billboard)
+  - 폰트 크기: 기본 9px, 호버 11px, 선택 13px
+  - 배경: 반투명 (dark: rgba(15,23,42,0.6), light: rgba(255,255,255,0.7))
+  - 비선택 시 opacity 0.15
 
 이벤트:
-  - onPointerOver → store.hoverPattern(id)
-  - onPointerOut → store.hoverPattern(null)
-  - onClick → store.selectPattern(id)
+  - onPointerOver → store.hoverPattern(id) + cursor: pointer
+  - onPointerOut → store.hoverPattern(null) + cursor: auto
+  - onClick → store.selectPattern(id) (stopPropagation)
 ```
 
 ### 4.4 CubeEdges.tsx — 큐브 엣지
 
 ```
-책임: 큐브의 12개 엣지를 와이어프레임으로 렌더링
-방식: <Line> 컴포넌트 (drei) 또는 BufferGeometry + LineSegments
+책임: 큐브의 12개 엣지를 와이어프레임으로 렌더링 + 선택 시 하이라이트
+방식: @react-three/drei의 <Line> 컴포넌트
 
-색상: #D1D5DB (밝은 회색)
-두께: 1px
+기본:
+  - 색상: dark #D1D5DB, light #94A3B8
+  - 두께: 1px
+  - opacity: 0.5
+
+선택 시 (패턴 노드 선택됨):
+  - 선택된 꼭짓점에 인접한 엣지: 하이라이트 (두께 4px, opacity 1, 테마색)
+  - 비인접 엣지: 페이드 아웃 (opacity 0.12)
 ```
 
 ### 4.5 AxisLabels.tsx — 축 라벨
 
 ```
-책임: 각 축 끝에 축 이름과 값 표시
+책임: 각 축 끝에 값 표시 + 선택 시 관련 축 강조
 
-X축 (통신):
-  -1 방향: "Sync"
-  +1 방향: "Async"
-  축 이름: "Communication"
+X축 (통신, 파란색 #60A5FA):
+  -1.5 방향: "Sync"
+  +1.5 방향: "Async"
 
-Y축 (일관성):
-  -1 방향: "Atomic"
-  +1 방향: "Eventual"
-  축 이름: "Consistency"
+Y축 (일관성, 녹색 #34D399):
+  -1.5 방향: "Atomic"
+  +1.5 방향: "Eventual"
 
-Z축 (조율):
-  -1 방향: "Orchestration"
-  +1 방향: "Choreography"
-  축 이름: "Coordination"
+Z축 (조율, 보라색 #A78BFA):
+  -1.5 방향: "Orchestration"
+  +1.5 방향: "Choreography"
 
-표시: 축 끝 약간 바깥에 텍스트 배치 (e.g. 1.3 위치)
+선택 시:
+  - 선택된 패턴의 축 값에 해당하는 라벨: 강조 (font-size 14px, weight 800, glow 효과)
+  - 비관련 라벨: 페이드 아웃 (opacity 0.2)
+  - 미선택 시: 기본 (opacity 0.7, font-size 11px)
 ```
 
 ### 4.6 DetailPanel.tsx — 상세 패널
@@ -269,18 +333,26 @@ Props: { pattern: SagaPattern }
 
 ```
 책임: Mermaid.js로 시퀀스 다이어그램 렌더링
-Props: { scenario: SagaScenario }
+Props: { patternId: string }
 
 렌더링:
-  - mermaid.render()로 SVG 생성
+  - mermaid.run()으로 임시 DOM 요소에 SVG 생성
   - dangerouslySetInnerHTML로 삽입
+  - securityLevel: 'strict' (XSS 방지)
+  - 테마: dark 모드 시 'dark', light 모드 시 'default'
 
 뷰 모드 (store.viewMode):
   - "happy": happyPath 렌더링
   - "failure": failurePaths[store.failurePoint] 렌더링
-  - "combined": alt 블록으로 성공/실패 모두 표시
+  - "combined": alt/else 블록으로 성공/실패 모두 표시
 
 뷰 모드 전환: 탭 버튼 그룹 (Happy / Failure / Combined)
+
+전체화면 모드:
+  - 전체화면 버튼 클릭 → 고정 모달 (z-50)
+  - 줌 컨트롤: 50%~250% (슬라이더 + ±버튼 + 리셋)
+  - body scroll 잠금
+  - ESC 키로 닫기
 ```
 
 ### 4.9 FailureInjector.tsx — 실패 주입
@@ -669,6 +741,46 @@ Phase 6: 마무리
 
 ### 접근성
 
-* 키보드 Tab으로 패턴 노드 순회 (MVP 이후)
+* 키보드 `/`로 패턴 검색 포커스
+* 키보드 `Escape`로 전체화면/검색 닫기
 * 색상 외 형태/텍스트로도 상태 구분
 * 다이어그램 alt text 제공
+
+---
+
+## 14. 테마 시스템
+
+```
+다크 모드 / 라이트 모드 지원
+토글: Header의 sun/moon 아이콘 버튼
+저장: localStorage('theme')에 저장, 페이지 로드 시 복원
+적용: html 요소에 'dark' 클래스 토글 (Tailwind darkMode: 'class')
+
+3D 씬:
+  - 배경: dark #0F172A / light #F8FAFC
+  - ambient: dark 0.5 / light 0.7
+  - point: dark 0.8 / light 1.0
+
+Mermaid:
+  - dark: 'dark' 테마 + 커스텀 themeVariables
+  - light: 'default' 테마 + 커스텀 themeVariables
+```
+
+---
+
+## 15. 배포
+
+```
+플랫폼: GitHub Pages
+자동화: GitHub Actions (.github/workflows/deploy.yml)
+트리거: main 브랜치 push 또는 수동 dispatch
+빌드: npm ci → npm audit --audit-level=high → npm run build
+아티팩트: dist/ 디렉토리를 Pages artifact로 업로드
+base path: /saga-pattern-3d-cube-simulation/ (vite.config.ts)
+URL: https://taehyoungkwon.github.io/saga-pattern-3d-cube-simulation/
+
+보안:
+  - Content-Security-Policy meta 태그 (index.html)
+  - Mermaid securityLevel: 'strict'
+  - .gitignore에 .env*, *.pem, *.key 포함
+```

@@ -119,11 +119,12 @@ Atomic ───────────── Eventual
 ```
 1. 3D 큐브 확인
 2. 큐브 회전
-3. 특정 패턴 클릭
+3. 패턴 검색 또는 특정 패턴 클릭
 4. 패턴 상세 보기
-5. 시퀀스 다이어그램 확인
+5. 시퀀스 다이어그램 확인 (전체화면 / 줌 지원)
 6. 성공/실패 시나리오 시뮬레이션
-7. 다른 패턴과 비교
+7. 다크/라이트 모드 전환
+8. 다른 패턴과 비교
 ```
 
 ---
@@ -138,10 +139,12 @@ Saga 패턴의 구조적 관계를 직관적으로 표현
 
 ### 기능
 
-* 큐브 회전
-* 줌
+* 큐브 회전 (드래그)
+* 줌 (스크롤)
 * 꼭짓점 클릭
 * 축 설명 표시
+* 패턴 검색 (키보드 `/` 단축키)
+* 선택 시 관련 엣지 하이라이트 + 미선택 노드 디밍
 
 ### 축 정의
 
@@ -208,12 +211,21 @@ Orchestration
 
 ```
 패턴 이름
-특성 요약 (3축 속성)
+특성 요약 (3축 속성 배지)
+설명
 장점
 단점
 추천 사용 상황
 복잡도 (Low / Medium / High)
 확장성 (Low / Medium / High)
+```
+
+### 시퀀스 다이어그램 뷰
+
+```
+뷰 모드 전환 (Happy / Failure / Combined)
+전체화면 모드 (줌 컨트롤: 50%~250%)
+ESC 키로 전체화면 닫기
 ```
 
 ### 패턴별 복잡도/확장성 매트릭스
@@ -375,8 +387,17 @@ Parallel Saga  vs  Anthology Saga
 
 ```
 기본 → 반투명 구체 + 패턴 이름 라벨
-호버 → 구체 확대 + 하이라이트 + 3축 속성 툴팁
-선택 → 구체 색상 변경 + 상세 패널 열림
+호버 → 구체 확대 (1.4x) + 하이라이트 + emissive 효과
+선택 → 구체 확대 (1.8x) + 색상 변경 + 상세 패널 열림
+비선택(다른 노드 선택 시) → 구체 축소 (0.7x) + 페이드 아웃 (opacity 0.25)
+```
+
+### 큐브 엣지 상태
+
+```
+기본 → 반투명 (#D1D5DB, opacity 0.5)
+선택된 노드의 인접 엣지 → 하이라이트 (두께 4px, opacity 1)
+비인접 엣지 (선택 시) → 페이드 아웃 (opacity 0.12)
 ```
 
 ---
@@ -419,7 +440,7 @@ Tailwind CSS
 ### 배포
 
 ```
-정적 사이트 (GitHub Pages 또는 Vercel)
+정적 사이트 (GitHub Pages + GitHub Actions 자동 배포)
 ```
 
 ---
@@ -438,6 +459,10 @@ type SagaPattern = {
   description: string
   advantages: string[]
   disadvantages: string[]
+  useCases: string[]
+  complexity: "low" | "medium" | "high"
+  scalability: "low" | "medium" | "high"
+  position: [number, number, number]
 }
 ```
 
@@ -446,8 +471,12 @@ type SagaPattern = {
 시나리오
 
 ```ts
+type FailurePoint = "payment" | "inventory" | "shipping"
+
 type SagaScenario = {
-  steps: SagaStep[]
+  patternId: string
+  happyPath: SagaStep[]
+  failurePaths: Record<FailurePoint, SagaStep[]>
 }
 ```
 
@@ -456,11 +485,13 @@ type SagaScenario = {
 Saga Step
 
 ```ts
+type StepActor = "Client" | "Orchestrator" | "OrderService" | "PaymentService" | "InventoryService" | "ShippingService"
+
 type SagaStep = {
-  actor: string
+  from: StepActor
+  to: StepActor
   action: string
-  target: string
-  type: "command" | "event" | "compensation"
+  type: "command" | "event" | "compensation" | "response"
   isAsync: boolean
 }
 ```
@@ -495,13 +526,21 @@ type SagaStep = {
 
 # 12. MVP 범위
 
-### MVP
+### MVP (구현 완료)
 
-* 3D 큐브
-* 8개 패턴 노드
-* 패턴 상세 설명
-* 시퀀스 다이어그램
-* 성공/실패 토글
+* 3D 큐브 (회전, 줌)
+* 8개 패턴 노드 (호버/선택/디밍 애니메이션)
+* 패턴 상세 설명 (장단점, 사용사례, 복잡도/확장성)
+* 시퀀스 다이어그램 (Mermaid.js)
+* 성공/실패/Combined 뷰 모드
+* 실패 주입 (Payment / Inventory / Shipping)
+* 패턴 검색 (/ 키보드 단축키)
+* 다크/라이트 모드 (localStorage 저장)
+* 다이어그램 전체화면 + 줌 컨트롤
+* 선택 시 엣지 하이라이트 + 노드 디밍
+* 반응형 레이아웃 (Desktop/Tablet/Mobile 드로어)
+* 축/색상 범례
+* GitHub Pages 자동 배포 (GitHub Actions)
 
 ### V2
 
